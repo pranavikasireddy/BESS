@@ -1,0 +1,9 @@
+pandas
+numpy
+pulp
+entsoe-py
+pyyaml
+python-dotenv
+matplotlib
+pytest
+ruff

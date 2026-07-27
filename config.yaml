@@ -1,0 +1,18 @@
+battery:
+  power_mw: 50
+  energy_mwh: 200
+  round_trip_efficiency: 0.88
+  cycle_cost_eur_mwh: 3.0
+
+market:
+  aFRR_reserve_mw: 10
+
+backtest:
+  start: "2021-01-01"
+  end: "2025-09-30"
+  # Cutoff is deliberate, not an oversight: on 1 Oct 2025 the European day-ahead
+  # market (NL included) switched from hourly to 15-minute price intervals
+  # (SDAC 15-minute MTU go-live). Ending here keeps the whole backtest at a
+  # single, consistent hourly resolution matching the LP's design. Extending
+  # past this date would require resampling 15-min prices to hourly, which
+  # flattens exactly the intra-hour volatility a battery is meant to exploit.
