@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:claude.ai)",
+      "Bash(python3 -c ' *)",
+      "Bash(wc -l \"/c/Users/Pranavi/AppData/Local/Temp/claude/C--Users-Pranavi-Documents-Coding-Projects-BESS/1053c3cd-c061-4e84-92b4-cb598facd304/scratchpad/bess_chat_full.txt\")",
+      "Skill(artifact-design)",
+      "Skill(artifact-design:*)"
+    ]
+  }
+}
