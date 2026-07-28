@@ -6,6 +6,18 @@ battery:
 
 market:
   aFRR_reserve_mw: 10
+  imbalance_margin_eur_mwh: 30.0
+  # PROVISIONAL, not finalised. Reactive imbalance layer only deviates from
+  # the baseline schedule when the imbalance price clears the day-ahead
+  # price by this margin, so it doesn't chase noise near break-even. This
+  # value came from sweeping 5-100 EUR/MWh on a single one-week sample
+  # (2024-01-01/08, winter) and picking the best performer on THAT week —
+  # good enough to build on, but tuning and reporting results on the same
+  # data is overfitting risk, not a validated choice. Before final results:
+  # re-tune on a training slice of the backtest (e.g. 2021-2023) and report
+  # headline revenue on a holdout slice (e.g. 2024-2025) the margin was
+  # never tuned on, so the reported number reflects a fixed, pre-committed
+  # rule rather than hindsight.
 
 backtest:
   start: "2021-01-01"
