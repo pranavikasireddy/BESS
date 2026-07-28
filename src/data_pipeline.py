@@ -12,7 +12,8 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 COUNTRY_CODE = "NL"
-AFRR_PROCESS_TYPE = "A51"  # A51 = aFRR, A47 = mFRR (ENTSO-E processType code)
+AFRR_PROCESS_TYPE = "A51"  # A51 = aFRR, A52 = FCR, A47 = mFRR (ENTSO-E processType code)
+FCR_PROCESS_TYPE = "A52"
 AFRR_MARKET_AGREEMENT = "A01"  # A01 = Daily contract (covers both 24h and 4h block eras)
 
 
@@ -61,6 +62,31 @@ def fetch_afrr_capacity_prices(start: str, end: str) -> pd.DataFrame:
         end=end_ts,
     )
     prices = prices.resample("1h").median()
+    logger.info("Fetched %d hourly rows", len(prices))
+    return prices
+
+
+def fetch_fcr_capacity_prices(start: str, end: str) -> pd.Series:
+    """Fetch NL FCR capacity prices (EUR/MW) from ENTSO-E, resampled to hourly.
+
+    FCR comes back as a single Symmetric price, not separate Up/Down like
+    aFRR — it responds automatically to frequency deviations in either
+    direction, so it can't be bid asymmetrically. Same day-boundary
+    resampling artifact as aFRR, same median fix.
+    """
+    client = _get_client()
+    start_ts = pd.Timestamp(start, tz="Europe/Amsterdam")
+    end_ts = pd.Timestamp(end, tz="Europe/Amsterdam")
+
+    logger.info("Fetching FCR capacity prices for %s from %s to %s", COUNTRY_CODE, start, end)
+    prices = client.query_contracted_reserve_prices(
+        COUNTRY_CODE,
+        process_type=FCR_PROCESS_TYPE,
+        type_marketagreement_type=AFRR_MARKET_AGREEMENT,
+        start=start_ts,
+        end=end_ts,
+    )
+    prices = prices["Symmetric"].resample("1h").median()
     logger.info("Fetched %d hourly rows", len(prices))
     return prices
 
