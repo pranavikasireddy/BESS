@@ -83,7 +83,11 @@ def run_heuristic_dispatch(
 
 
 if __name__ == "__main__":
-    from src.data_pipeline import fetch_afrr_capacity_prices, fetch_day_ahead_prices, load_config
+    from src.data_pipeline import (
+        fetch_afrr_capacity_prices,
+        fetch_day_ahead_prices,
+        load_config,
+    )
 
     config = load_config()
     start, end = "2024-01-01", "2024-01-08"

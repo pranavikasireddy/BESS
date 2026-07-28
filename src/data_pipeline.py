@@ -40,10 +40,13 @@ def fetch_day_ahead_prices(start: str, end: str) -> pd.Series:
 def fetch_afrr_capacity_prices(start: str, end: str) -> pd.DataFrame:
     """Fetch NL aFRR capacity prices (EUR/MW, Up/Down columns) from ENTSO-E, resampled to hourly.
 
-    Native resolution is 15 minutes, but the price only changes at block
-    boundaries (24h blocks before ~2025-07, 4h blocks after), so taking the
-    first value per hour is lossless and keeps this aligned with the hourly
-    day-ahead series.
+    Native resolution is 15 minutes, and the price is constant within each
+    real bidding block (24h before ~2025-07, 4h after) EXCEPT for the very
+    first quarter-hour at each block boundary, which ENTSO-E's feed reports
+    as the average of the outgoing and incoming block's prices (a
+    data-stitching artifact, not a real price). Using the hourly median
+    instead of the first value is robust to that single corrupted quarter
+    without losing anything real.
     """
     client = _get_client()
     start_ts = pd.Timestamp(start, tz="Europe/Amsterdam")
@@ -57,7 +60,7 @@ def fetch_afrr_capacity_prices(start: str, end: str) -> pd.DataFrame:
         start=start_ts,
         end=end_ts,
     )
-    prices = prices.resample("1h").first()
+    prices = prices.resample("1h").median()
     logger.info("Fetched %d hourly rows", len(prices))
     return prices
 
