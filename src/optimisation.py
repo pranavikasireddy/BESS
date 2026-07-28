@@ -7,7 +7,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 
-def _group_into_price_blocks(df: pd.DataFrame, columns: list[str]) -> list[list[pd.Timestamp]]:
+def _group_into_price_blocks(
+    df: pd.DataFrame, columns: list[str]
+) -> list[list[pd.Timestamp]]:
     """Group consecutive hours into TenneT's real bidding blocks for the
     given price column(s), detected directly from the data (runs of
     identical price) rather than a hardcoded cutover date. Self-adapts:
@@ -101,15 +103,25 @@ def run_lp_dispatch(
 
     prev_soc = 0.0
     for t in hours:
-        problem += discharge[t] + afrr_up_mw[t] + fcr_mw[t] <= power_mw, f"up_headroom_{t}"
-        problem += charge[t] + afrr_down_mw[t] + fcr_mw[t] <= power_mw, f"down_headroom_{t}"
+        problem += (
+            discharge[t] + afrr_up_mw[t] + fcr_mw[t] <= power_mw,
+            f"up_headroom_{t}",
+        )
+        problem += (
+            charge[t] + afrr_down_mw[t] + fcr_mw[t] <= power_mw,
+            f"down_headroom_{t}",
+        )
         # LER rule: reservation must be backed by energy (Up/FCR) or headroom
         # (Down/FCR) actually available at the start of the hour, for a full ISP.
         problem += (afrr_up_mw[t] + fcr_mw[t]) * isp_hours <= prev_soc, f"ler_up_{t}"
         problem += (
-            (afrr_down_mw[t] + fcr_mw[t]) * isp_hours <= energy_mwh - prev_soc
-        ), f"ler_down_{t}"
-        problem += soc[t] == prev_soc + charge[t] * efficiency - discharge[t], f"soc_{t}"
+            ((afrr_down_mw[t] + fcr_mw[t]) * isp_hours <= energy_mwh - prev_soc),
+            f"ler_down_{t}",
+        )
+        problem += (
+            soc[t] == prev_soc + charge[t] * efficiency - discharge[t],
+            f"soc_{t}",
+        )
         prev_soc = soc[t]
 
     problem.solve(pulp.PULP_CBC_CMD(msg=False))
@@ -136,7 +148,10 @@ def run_lp_dispatch(
                 "afrr_revenue": afrr_revenue,
                 "fcr_revenue": fcr_revenue,
                 "cycling_cost": cycling_cost,
-                "net_revenue": day_ahead_revenue + afrr_revenue + fcr_revenue - cycling_cost,
+                "net_revenue": day_ahead_revenue
+                + afrr_revenue
+                + fcr_revenue
+                - cycling_cost,
             }
         )
 
@@ -168,8 +183,16 @@ if __name__ == "__main__":
     print(result.head(10))
     print(
         result[
-            ["day_ahead_revenue", "afrr_revenue", "fcr_revenue", "cycling_cost", "net_revenue"]
+            [
+                "day_ahead_revenue",
+                "afrr_revenue",
+                "fcr_revenue",
+                "cycling_cost",
+                "net_revenue",
+            ]
         ].sum()
     )
-    both_active = ((result["charge_mwh"] > 1e-6) & (result["discharge_mwh"] > 1e-6)).sum()
+    both_active = (
+        (result["charge_mwh"] > 1e-6) & (result["discharge_mwh"] > 1e-6)
+    ).sum()
     print(f"Hours with simultaneous charge AND discharge: {both_active}")

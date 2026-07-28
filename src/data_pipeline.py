@@ -91,6 +91,30 @@ def fetch_fcr_capacity_prices(start: str, end: str) -> pd.Series:
     return prices
 
 
+def fetch_imbalance_prices(start: str, end: str) -> pd.DataFrame:
+    """Fetch NL imbalance prices (EUR/MWh, Long/Short columns) from ENTSO-E.
+
+    Kept at native 15-minute resolution (the Dutch ISP), not resampled to
+    hourly like the capacity products — imbalance settlement genuinely
+    happens at this granularity, and a reactive rule needs real-time-level
+    prices, not an hourly average.
+
+    Long and Short are equal in most periods (single pricing) but diverge
+    during TenneT's "regulation state 2": periods where both upward and
+    downward regulation were activated within the same ISP, priced
+    asymmetrically to penalise both directions rather than reward whichever
+    one a party happened to land on.
+    """
+    client = _get_client()
+    start_ts = pd.Timestamp(start, tz="Europe/Amsterdam")
+    end_ts = pd.Timestamp(end, tz="Europe/Amsterdam")
+
+    logger.info("Fetching imbalance prices for %s from %s to %s", COUNTRY_CODE, start, end)
+    prices = client.query_imbalance_prices(COUNTRY_CODE, start=start_ts, end=end_ts)
+    logger.info("Fetched %d rows", len(prices))
+    return prices
+
+
 if __name__ == "__main__":
     config = load_config()
     backtest_start = config["backtest"]["start"]
@@ -103,3 +127,11 @@ if __name__ == "__main__":
     afrr = fetch_afrr_capacity_prices(backtest_start, backtest_end)
     print(afrr.head())
     print(afrr.tail())
+
+    fcr = fetch_fcr_capacity_prices(backtest_start, backtest_end)
+    print(fcr.head())
+    print(fcr.tail())
+
+    imbalance = fetch_imbalance_prices(backtest_start, backtest_end)
+    print(imbalance.head())
+    print(imbalance.tail())
