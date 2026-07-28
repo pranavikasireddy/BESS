@@ -2,16 +2,13 @@ import logging
 
 import pandas as pd
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 CHARGE_HOURS_PER_DAY = 4
 DISCHARGE_HOURS_PER_DAY = 4
 
 
-def run_heuristic_dispatch(
-    day_ahead: pd.Series, afrr_up: pd.Series, config: dict
-) -> pd.DataFrame:
+def run_heuristic_dispatch(day_ahead: pd.Series, afrr_up: pd.Series, config: dict) -> pd.DataFrame:
     """Fixed-rule dispatch: charge the 4 cheapest hours/day, discharge the 4
     priciest, reserve a fixed aFRR block every hour. This is the naive
     benchmark the LP gets measured against — a mechanical rule, no
@@ -88,6 +85,8 @@ if __name__ == "__main__":
         fetch_day_ahead_prices,
         load_config,
     )
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     config = load_config()
     start, end = "2024-01-01", "2024-01-08"

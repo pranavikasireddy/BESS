@@ -6,7 +6,6 @@ import yaml
 from dotenv import load_dotenv
 from entsoe import EntsoePandasClient
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 load_dotenv()
@@ -116,6 +115,8 @@ def fetch_imbalance_prices(start: str, end: str) -> pd.DataFrame:
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
     config = load_config()
     backtest_start = config["backtest"]["start"]
     backtest_end = config["backtest"]["end"]

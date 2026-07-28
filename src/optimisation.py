@@ -3,7 +3,6 @@ import logging
 import pandas as pd
 import pulp
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 ISP_HOURS = 0.25  # Dutch Imbalance Settlement Period = 15 minutes
@@ -108,8 +107,9 @@ def _solve_lp(
 
     problem.solve(pulp.PULP_CBC_CMD(msg=False))
     if pulp.LpStatus[problem.status] != "Optimal":
-        logger.warning("LP status: %s for window %s to %s", pulp.LpStatus[problem.status],
-                        hours[0], hours[-1])
+        logger.warning(
+            "LP status: %s for window %s to %s", pulp.LpStatus[problem.status], hours[0], hours[-1]
+        )
 
     records = []
     for t in hours:
@@ -204,9 +204,7 @@ def run_rolling_horizon_lp(
     daily_results = []
     initial_soc = 0.0
     for _, day_df in df.groupby(df.index.date):
-        day_result = _solve_lp(
-            day_df, config, initial_soc=initial_soc, terminal_soc=boundary_soc
-        )
+        day_result = _solve_lp(day_df, config, initial_soc=initial_soc, terminal_soc=boundary_soc)
         daily_results.append(day_result)
         initial_soc = boundary_soc
 
@@ -228,6 +226,8 @@ if __name__ == "__main__":
         load_config,
     )
 
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
     config = load_config()
     start, end = "2024-01-01", "2024-01-08"
 
@@ -242,5 +242,7 @@ if __name__ == "__main__":
     print(f"  EUR {full['net_revenue'].sum():,.0f}")
     print("Rolling-horizon (realistic, day-by-day):")
     print(f"  EUR {rolling['net_revenue'].sum():,.0f}")
-    print(f"  Rolling captures {rolling['net_revenue'].sum() / full['net_revenue'].sum():.1%} "
-          f"of the full-horizon ceiling")
+    print(
+        f"  Rolling captures {rolling['net_revenue'].sum() / full['net_revenue'].sum():.1%} "
+        f"of the full-horizon ceiling"
+    )

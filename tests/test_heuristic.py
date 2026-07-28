@@ -63,9 +63,7 @@ def test_revenue_accounting_identity():
 
     result = run_heuristic_dispatch(day_ahead, afrr_up, config)
 
-    expected_net = (
-        result["day_ahead_revenue"] + result["afrr_revenue"] - result["cycling_cost"]
-    )
+    expected_net = result["day_ahead_revenue"] + result["afrr_revenue"] - result["cycling_cost"]
     assert result["net_revenue"].tolist() == pytest.approx(expected_net.tolist())
     assert result["afrr_revenue"].tolist() == pytest.approx([10.0 * 5.0] * 24)
 

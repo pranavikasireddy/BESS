@@ -2,7 +2,6 @@ import logging
 
 import pandas as pd
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 ISP_HOURS = 0.25  # Dutch Imbalance Settlement Period = 15 minutes
@@ -123,6 +122,8 @@ if __name__ == "__main__":
     )
     from src.heuristic import run_heuristic_dispatch
 
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
     config = load_config()
     start, end = "2024-01-01", "2024-01-08"
 
@@ -134,9 +135,9 @@ if __name__ == "__main__":
     overlay = apply_imbalance_overlay(dispatch, day_ahead, imbalance, config)
 
     print(overlay.head(10))
-    print(
-        overlay[["imbalance_revenue", "imbalance_cycling_cost", "imbalance_net_revenue"]].sum()
-    )
+    print(overlay[["imbalance_revenue", "imbalance_cycling_cost", "imbalance_net_revenue"]].sum())
     print(f"Base heuristic net revenue: EUR {dispatch['net_revenue'].sum():.0f}")
-    print(f"Combined (heuristic + imbalance overlay): EUR "
-          f"{dispatch['net_revenue'].sum() + overlay['imbalance_net_revenue'].sum():.0f}")
+    print(
+        f"Combined (heuristic + imbalance overlay): EUR "
+        f"{dispatch['net_revenue'].sum() + overlay['imbalance_net_revenue'].sum():.0f}"
+    )

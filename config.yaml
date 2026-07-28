@@ -6,6 +6,11 @@ battery:
 
 market:
   aFRR_reserve_mw: 10
+  rolling_horizon_boundary_soc_frac: 0.5
+  # Fraction of energy_mwh the rolling-horizon LP must start/end each day
+  # at (day one starts at 0 instead). Without this, solving each day in
+  # isolation makes the LP always want to end at 0 SoC — see
+  # src/optimisation.py: run_rolling_horizon_lp.
   imbalance_margin_eur_mwh: 30.0
   # PROVISIONAL, not finalised. Reactive imbalance layer only deviates from
   # the baseline schedule when the imbalance price clears the day-ahead
