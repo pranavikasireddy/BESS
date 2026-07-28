@@ -6,10 +6,10 @@ import pulp
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
+ISP_HOURS = 0.25  # Dutch Imbalance Settlement Period = 15 minutes
 
-def _group_into_price_blocks(
-    df: pd.DataFrame, columns: list[str]
-) -> list[list[pd.Timestamp]]:
+
+def _group_into_price_blocks(df: pd.DataFrame, columns: list[str]) -> list[list[pd.Timestamp]]:
     """Group consecutive hours into TenneT's real bidding blocks for the
     given price column(s), detected directly from the data (runs of
     identical price) rather than a hardcoded cutover date. Self-adapts:
@@ -28,49 +28,22 @@ def _group_into_price_blocks(
     return blocks
 
 
-def run_lp_dispatch(
-    day_ahead: pd.Series,
-    afrr_up: pd.Series,
-    afrr_down: pd.Series,
-    fcr: pd.Series,
-    config: dict,
+def _solve_lp(
+    df: pd.DataFrame, config: dict, initial_soc: float, terminal_soc: float | None
 ) -> pd.DataFrame:
-    """Full-horizon LP: co-optimises day-ahead arbitrage against asymmetric
-    aFRR capacity and symmetric FCR capacity reservation (PuLP + CBC). Sees
-    the entire price series before deciding anything, so this is a
-    perfect-foresight ceiling, not a realistic achievable strategy — report
-    it alongside a rolling-horizon version, not on its own.
-
-    FCR is symmetric (one price, one MW figure) rather than Up/Down like
-    aFRR, because it responds automatically to frequency deviations in
-    either direction — so a reserved FCR MW competes for headroom on BOTH
-    the charge and discharge side simultaneously, unlike aFRR's Up/Down
-    which each only compete on one side.
-
-    Enforces TenneT's LER (Limited Energy Resource) rule: reserved capacity
-    (aFRR + FCR together) must be backed by enough real energy (Up/FCR) or
-    headroom (Down/FCR) to sustain it for a full 15-minute ISP, not just fit
-    under the power rating. Without this, the LP can reserve capacity from
-    an empty battery for free.
-
-    Enforces block-granularity separately for aFRR and FCR: each must stay
-    constant within its own real bidding block (detected empirically from
-    the price data — see _group_into_price_blocks). Without this, the LP
-    gets hour-by-hour flexibility that didn't actually exist for most of
-    the backtest window, inflating revenue relative to what was achievable.
+    """Core LP solve shared by the full-horizon and rolling-horizon
+    dispatchers — same objective and constraints either way, so the only
+    real difference between them is how much of the price series `df`
+    covers and what SoC boundary conditions bracket it. See
+    run_lp_dispatch and run_rolling_horizon_lp for what each represents.
     """
     battery = config["battery"]
     power_mw = battery["power_mw"]
     energy_mwh = battery["energy_mwh"]
     efficiency = battery["round_trip_efficiency"]
     cycle_cost = battery["cycle_cost_eur_mwh"]
-    isp_hours = 0.25  # Dutch Imbalance Settlement Period = 15 minutes
 
-    df = pd.DataFrame(
-        {"day_ahead": day_ahead, "afrr_up": afrr_up, "afrr_down": afrr_down, "fcr": fcr}
-    ).dropna()
     hours = list(df.index)
-
     problem = pulp.LpProblem("bess_dispatch", pulp.LpMaximize)
 
     charge = pulp.LpVariable.dicts("charge", hours, lowBound=0)
@@ -101,7 +74,7 @@ def run_lp_dispatch(
         for t in hours
     )
 
-    prev_soc = 0.0
+    prev_soc = initial_soc
     for t in hours:
         problem += (
             discharge[t] + afrr_up_mw[t] + fcr_mw[t] <= power_mw,
@@ -113,9 +86,9 @@ def run_lp_dispatch(
         )
         # LER rule: reservation must be backed by energy (Up/FCR) or headroom
         # (Down/FCR) actually available at the start of the hour, for a full ISP.
-        problem += (afrr_up_mw[t] + fcr_mw[t]) * isp_hours <= prev_soc, f"ler_up_{t}"
+        problem += (afrr_up_mw[t] + fcr_mw[t]) * ISP_HOURS <= prev_soc, f"ler_up_{t}"
         problem += (
-            ((afrr_down_mw[t] + fcr_mw[t]) * isp_hours <= energy_mwh - prev_soc),
+            ((afrr_down_mw[t] + fcr_mw[t]) * ISP_HOURS <= energy_mwh - prev_soc),
             f"ler_down_{t}",
         )
         problem += (
@@ -124,8 +97,13 @@ def run_lp_dispatch(
         )
         prev_soc = soc[t]
 
+    if terminal_soc is not None:
+        problem += soc[hours[-1]] == terminal_soc, "terminal_soc"
+
     problem.solve(pulp.PULP_CBC_CMD(msg=False))
-    logger.info("LP status: %s", pulp.LpStatus[problem.status])
+    if pulp.LpStatus[problem.status] != "Optimal":
+        logger.warning("LP status: %s for window %s to %s", pulp.LpStatus[problem.status],
+                        hours[0], hours[-1])
 
     records = []
     for t in hours:
@@ -148,17 +126,83 @@ def run_lp_dispatch(
                 "afrr_revenue": afrr_revenue,
                 "fcr_revenue": fcr_revenue,
                 "cycling_cost": cycling_cost,
-                "net_revenue": day_ahead_revenue
-                + afrr_revenue
-                + fcr_revenue
-                - cycling_cost,
+                "net_revenue": day_ahead_revenue + afrr_revenue + fcr_revenue - cycling_cost,
             }
         )
+    return pd.DataFrame.from_records(records).set_index("timestamp")
 
-    result = pd.DataFrame.from_records(records).set_index("timestamp")
+
+def _build_price_frame(
+    day_ahead: pd.Series, afrr_up: pd.Series, afrr_down: pd.Series, fcr: pd.Series
+) -> pd.DataFrame:
+    return pd.DataFrame(
+        {"day_ahead": day_ahead, "afrr_up": afrr_up, "afrr_down": afrr_down, "fcr": fcr}
+    ).dropna()
+
+
+def run_lp_dispatch(
+    day_ahead: pd.Series,
+    afrr_up: pd.Series,
+    afrr_down: pd.Series,
+    fcr: pd.Series,
+    config: dict,
+) -> pd.DataFrame:
+    """Full-horizon LP: co-optimises day-ahead arbitrage against asymmetric
+    aFRR capacity and symmetric FCR capacity reservation (PuLP + CBC), given
+    the ENTIRE price series at once. This is a perfect-foresight ceiling —
+    an upper bound on achievable revenue, not a realistic strategy, since a
+    real operator would never see next month's prices while deciding
+    today's dispatch. Report alongside run_rolling_horizon_lp, not alone.
+    """
+    df = _build_price_frame(day_ahead, afrr_up, afrr_down, fcr)
+    result = _solve_lp(df, config, initial_soc=0.0, terminal_soc=None)
     logger.info(
-        "LP dispatch: %d hours, total net revenue EUR %.0f",
+        "Full-horizon LP: %d hours, total net revenue EUR %.0f",
         len(result),
+        result["net_revenue"].sum(),
+    )
+    return result
+
+
+def run_rolling_horizon_lp(
+    day_ahead: pd.Series,
+    afrr_up: pd.Series,
+    afrr_down: pd.Series,
+    fcr: pd.Series,
+    config: dict,
+) -> pd.DataFrame:
+    """Rolling-horizon LP: solves one calendar day at a time, using only
+    that day's own prices — genuinely known by the time of dispatch, since
+    NL's day-ahead auction clears ~noon the day before delivery, and
+    aFRR/FCR capacity auctions run daily on the same d-1 basis. This is the
+    realistic, defensible headline number, unlike run_lp_dispatch's
+    perfect-foresight ceiling.
+
+    Solving each day in isolation makes an unconstrained LP want to end at
+    0 SoC every day (nothing to gain by holding energy it can't see
+    tomorrow's value for). Fixed by requiring every day to both start AND
+    end at a fixed boundary SoC (config: rolling_horizon_boundary_soc_frac,
+    default 50% of capacity) — except day one, which starts at 0 like every
+    other method in this project, for a like-for-like comparison.
+    """
+    df = _build_price_frame(day_ahead, afrr_up, afrr_down, fcr)
+    boundary_frac = config["market"].get("rolling_horizon_boundary_soc_frac", 0.5)
+    boundary_soc = config["battery"]["energy_mwh"] * boundary_frac
+
+    daily_results = []
+    initial_soc = 0.0
+    for _, day_df in df.groupby(df.index.date):
+        day_result = _solve_lp(
+            day_df, config, initial_soc=initial_soc, terminal_soc=boundary_soc
+        )
+        daily_results.append(day_result)
+        initial_soc = boundary_soc
+
+    result = pd.concat(daily_results)
+    logger.info(
+        "Rolling-horizon LP: %d hours across %d days, total net revenue EUR %.0f",
+        len(result),
+        len(daily_results),
         result["net_revenue"].sum(),
     )
     return result
@@ -179,20 +223,12 @@ if __name__ == "__main__":
     afrr = fetch_afrr_capacity_prices(start, end)
     fcr = fetch_fcr_capacity_prices(start, end)
 
-    result = run_lp_dispatch(day_ahead, afrr["Up"], afrr["Down"], fcr, config)
-    print(result.head(10))
-    print(
-        result[
-            [
-                "day_ahead_revenue",
-                "afrr_revenue",
-                "fcr_revenue",
-                "cycling_cost",
-                "net_revenue",
-            ]
-        ].sum()
-    )
-    both_active = (
-        (result["charge_mwh"] > 1e-6) & (result["discharge_mwh"] > 1e-6)
-    ).sum()
-    print(f"Hours with simultaneous charge AND discharge: {both_active}")
+    full = run_lp_dispatch(day_ahead, afrr["Up"], afrr["Down"], fcr, config)
+    rolling = run_rolling_horizon_lp(day_ahead, afrr["Up"], afrr["Down"], fcr, config)
+
+    print("Full-horizon (perfect foresight ceiling):")
+    print(f"  EUR {full['net_revenue'].sum():,.0f}")
+    print("Rolling-horizon (realistic, day-by-day):")
+    print(f"  EUR {rolling['net_revenue'].sum():,.0f}")
+    print(f"  Rolling captures {rolling['net_revenue'].sum() / full['net_revenue'].sum():.1%} "
+          f"of the full-horizon ceiling")
