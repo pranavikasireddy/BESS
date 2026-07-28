@@ -19,6 +19,18 @@ market:
   # never tuned on, so the reported number reflects a fixed, pre-committed
   # rule rather than hindsight.
 
+grid:
+  transport_eur_per_mw_year: 60650
+  # PROVISIONAL — approximate, from TenneT's 2024 fixed annual "kW-contract"
+  # capacity charge (~EUR 60,650/MW/year), found via general web search, not
+  # verified against TenneT's primary tariff schedule (tennet.eu/tariffs).
+  # A second component — a monthly max-demand "kW-max" charge (~EUR
+  # 6,910/MW/month) — is a real additional cost this model does NOT yet
+  # include; treat this figure as a lower bound on true transport cost, not
+  # the full picture. Fixed/capacity-based, so it doesn't depend on dispatch
+  # and isn't part of the LP objective — applied as a lump-sum deduction
+  # after dispatch is computed (see src/costs.py).
+
 backtest:
   start: "2021-01-01"
   end: "2025-09-30"
