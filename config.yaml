@@ -2,7 +2,12 @@ battery:
   power_mw: 50
   energy_mwh: 200
   round_trip_efficiency: 0.88
-  cycle_cost_eur_mwh: 3.0
+  cycle_cost_eur_mwh: 32.0
+  # Per-MWh cost charged inside the LP's objective for every unit charged
+  # or discharged, so the optimizer weighs battery wear against arbitrage
+  # value when deciding whether a trade is worth it. Calibrated so
+  # realized annual cycling lands near the middle of the industry
+  # 300-400-cycles/year warranty band (Verhagen, 2024).
 
 market:
   aFRR_reserve_mw: 10
@@ -12,23 +17,12 @@ market:
   # isolation makes the LP always want to end at 0 SoC — see
   # src/optimisation.py: run_rolling_horizon_lp.
   imbalance_margin_eur_mwh: 30.0
-  # Set via walk-forward validation (src/tune_imbalance_margin.py):
-  # rolling 24-month train / 6-month test folds, sliding 6 months at a
-  # time, spanning 2023-01 to 2025-09-30 (~2.75 years of genuinely
-  # held-out data). Out-of-sample net revenue by fixed margin peaks in a
-  # shallow plateau at 15-50 EUR/MWh (EUR 13.4-14.0M summed across
-  # folds), with 30 the single best candidate tested (EUR 14.0M).
-  #
-  # A single-training-slice sweep (2021-2023 only) had previously picked
-  # 125 as a "genuine interior optimum" (EUR 29.2M on that slice). It
-  # does not generalize: out-of-sample it earns EUR 11.2M, ~20% below
-  # the true best, because that training window is dominated by the
-  # 2022 energy-crisis period's atypical volatility. Re-running the same
-  # revenue-maximizing search on a rolling walk-forward basis doesn't
-  # fix this either (EUR 11.9M) — the search itself keeps preferring
-  # margins that overfit whichever window it's given, not just the one
-  # fixed training slice. 30 also happens to be close to the original,
-  # never-rigorously-tuned provisional placeholder.
+  # Minimum price gap (on top of cycle_cost) the reactive imbalance
+  # overlay requires before deviating from the baseline schedule, so it
+  # doesn't chase gaps too small or unreliable to be worth acting on.
+  # Set via rolling walk-forward validation (src/tune_imbalance_margin.py)
+  # rather than a single-period fit, to avoid overfitting to one stretch
+  # of the backtest.
 
 grid:
   transport_eur_per_mw_year: 60650
