@@ -12,41 +12,39 @@ def apply_imbalance_overlay(
 ) -> pd.DataFrame:
     """Reactive imbalance rule layered on top of an already-computed hourly
     dispatch. Only reads charge_mwh/discharge_mwh/soc_mwh from `dispatch`,
-    so it's identical whether that came from heuristic.py or
-    optimisation.py — any revenue difference stays attributable to the
-    scheduling method, not to this layer.
+    so it works identically regardless of whether that came from
+    heuristic.py or optimisation.py.
 
-    Decides using only the PREVIOUS quarter-hour's imbalance price, not the
-    current one. TenneT's own documentation confirms the final settled
-    price for a quarter is only known once that quarter closes — the live
-    signal during the quarter is a delayed, indicative estimate, not
-    something this project has real archived data for. Using the prior
-    quarter's already-final price is the most recent genuinely-known
-    information a real decision could be based on. Settlement still uses
-    the ACTUAL current quarter's price, though — the decision is made on
-    stale information, but real money settles at the real (possibly
-    different) rate, which is exactly the execution risk a live operator
-    faces and a same-quarter rule would hide.
+    Decisions use only the PREVIOUS quarter-hour's imbalance price, not
+    the current one: the settled price for a given quarter isn't known
+    until that quarter closes, so reacting to a quarter's own price would
+    assume information not actually available at decision time. Actual
+    settlement still uses the real current-quarter price, so a decision
+    made on the prior quarter's signal can turn out better or worse than
+    expected — the same execution risk a live operator faces.
 
-    Deliberately skips TenneT's dual-pricing ("regulation state 2")
-    periods (judged from the prior quarter, same as everything else here)
-    — those exist specifically to penalise both long and short positions,
-    so there's no edge to react to (confirmed against TenneT's Imbalance
-    Pricing System documentation, not assumed).
+    Skips TenneT's dual-pricing ("regulation state 2") periods, which
+    apply when both upward and downward regulation were activated within
+    the same settlement period. Dual pricing penalises both long and
+    short positions in those periods, so there's no profitable direction
+    to react to.
 
-    During single-priced periods, deviates from the baseline only when the
-    prior quarter's imbalance price cleared a margin over/under the
-    day-ahead price the baseline energy was already sold/bought at:
-    - Long price attractive (> day-ahead + margin) -> discharge extra.
-    - Short price attractive (< day-ahead - margin, often negative) ->
-      charge extra.
+    During single-priced periods, the rule deviates from the baseline
+    schedule only when the prior quarter's imbalance price clears both
+    the margin AND the cycling cost over/under the day-ahead price the
+    baseline energy was already sold/bought at — the trade must be worth
+    doing net of wear, not just bigger than the noise-filter margin:
+    - Long price attractive (> day-ahead + margin + cycle_cost) ->
+      discharge extra.
+    - Short price attractive (< day-ahead - margin - cycle_cost, often
+      negative) -> charge extra.
 
-    The hourly baseline is assumed spread evenly across its four quarters
-    (day-ahead has no sub-hourly granularity to do otherwise). Bounded by
-    the battery's power rating and SoC limits, net of the baseline's own
-    quarter-share of both — NOT net of any aFRR/FCR reservation. That's a
-    stated simplification: this overlay could in principle encroach on
-    capacity already sold to aFRR/FCR. Left as a further refinement.
+    The hourly baseline is spread evenly across its four quarters
+    (day-ahead has no sub-hourly granularity). Extra charge/discharge is
+    bounded by the battery's power rating and SoC limits, net of the
+    baseline's own quarter-share of power — but not net of any aFRR/FCR
+    reservation, so this overlay can in principle draw on capacity already
+    committed to those products.
     """
     battery = config["battery"]
     power_mw = battery["power_mw"]
@@ -55,7 +53,11 @@ def apply_imbalance_overlay(
     cycle_cost = battery["cycle_cost_eur_mwh"]
     margin = config["market"].get("imbalance_margin_eur_mwh", 5.0)
 
-    hours = imbalance.index.floor("h")
+    # Floor via UTC, not local time: local time repeats an hour every DST
+    # fall-back (e.g. 2021-10-31 02:00 occurs twice), which makes flooring
+    # directly in local time genuinely ambiguous. UTC has no DST, so
+    # converting first sidesteps the ambiguity entirely.
+    hours = imbalance.index.tz_convert("UTC").floor("h").tz_convert("Europe/Amsterdam")
     baseline_charge = (dispatch["charge_mwh"].reindex(hours).to_numpy()) / 4
     baseline_discharge = (dispatch["discharge_mwh"].reindex(hours).to_numpy()) / 4
     day_ahead_price = day_ahead.reindex(hours).to_numpy()
@@ -75,9 +77,9 @@ def apply_imbalance_overlay(
         extra_charge = 0.0
         extra_discharge = 0.0
         if single_priced_prev[i]:
-            if long_price_prev[i] > day_ahead_price[i] + margin:
+            if long_price_prev[i] > day_ahead_price[i] + margin + cycle_cost:
                 extra_discharge = max(0.0, min(remaining_power, soc))
-            elif short_price_prev[i] < day_ahead_price[i] - margin:
+            elif short_price_prev[i] < day_ahead_price[i] - margin - cycle_cost:
                 extra_charge = max(0.0, min(remaining_power, (energy_mwh - soc) / efficiency))
 
         soc += (
